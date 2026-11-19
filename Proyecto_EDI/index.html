@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description"
+          content="Simulador académico de desfibrilador médico inspirado en LIFEPAK 20e. Modelo de circuito RLC resuelto con Runge-Kutta 4° orden. Proyecto de Ecuaciones Diferenciales Ordinarias.">
+    <meta name="keywords" content="desfibrilador, RLC, Runge-Kutta, EDO, simulador, LIFEPAK, ECG">
+    <meta name="author" content="Proyecto Académico — Ecuaciones Diferenciales">
+    <title>SimDesFib | Simulador de Desfibrilador LIFEPAK — RLC + RK4</title>
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+    <script>
+        window.onerror = function(msg, url, lineNo, columnNo, error) {
+            const errDiv = document.createElement('div');
+            errDiv.style.cssText = 'position:fixed;top:0;left:0;right:0;background:red;color:white;z-index:9999;padding:10px;font-family:monospace;white-space:pre-wrap;';
+            errDiv.textContent = 'JS Error: ' + msg + '\nLine: ' + lineNo + '\nURL: ' + url + '\nStack: ' + (error ? error.stack : '');
+            document.body.prepend(errDiv);
+            return false;
+        };
+    </script>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         CABECERA DEL SIMULADOR
+         ════════════════════════════════════════════════════════════════ -->
+    <header class="app-header" role="banner">
+        <div class="header-brand">
+            <div class="brand-icon" aria-hidden="true">⚡</div>
+            <div class="brand-text">
+                <h1 class="brand-title">SimDesFib</h1>
+                <span class="brand-subtitle">Simulador de Desfibrilador — EDO &amp; Runge-Kutta 4°</span>
+            </div>
+        </div>
+
+        <div class="header-status" role="status" aria-live="polite">
+            <div class="status-dot" id="status-dot" aria-hidden="true"></div>
+            <span class="status-text" id="status-text">SISTEMA APAGADO</span>
+        </div>
+
+        <div class="header-phase">
+            <span class="phase-badge">FASE 1 — Motor Matemático RLC + RK4</span>
+        </div>
+    </header>
+
+    <!-- ════════════════════════════════════════════════════════════════
+         CONTENEDOR PRINCIPAL (3 columnas)
+         ════════════════════════════════════════════════════════════════ -->
+    <main class="app-main" role="main">
+
+        <!-- ════════════════════════════════════════════════════════════
+             PANEL IZQUIERDO — ENTORNO SIMULADO
+             (Externo al desfibrilador, parámetros educativos)
+             ════════════════════════════════════════════════════════════ -->
+        <aside class="panel-entorno" id="panel-entorno"
+               aria-label="Panel del entorno simulado">
+
+            <div class="panel-header">
+                <span class="panel-icon" aria-hidden="true">🔬</span>
+                <h2>Entorno Simulado</h2>
+            </div>
+
+            <!-- Selector de Caso Clínico -->
+            <div class="control-group" id="selector-caso">
+                <label class="control-label" id="label-caso">CASO CLÍNICO INICIAL</label>
+                <div class="caso-buttons" role="radiogroup" aria-labelledby="label-caso">
+
+                    <button class="btn-caso active" id="caso-fv" data-caso="fv"
+                            role="radio" aria-checked="true"
+                            title="Fibrilación Ventricular: onda caótica de alta frecuencia. Se trata con shock.">
+                        <span class="caso-icon" aria-hidden="true">〰️</span>
+                        <span class="caso-name">Fibrilación Ventricular</span>
+                        <span class="caso-bpm">CAOS — Shock recomendado</span>
+                    </button>
+
+                    <button class="btn-caso" id="caso-tv" data-caso="tv"
+                            role="radio" aria-checked="false"
+                            title="Taquicardia Ventricular: 180 BPM. Requiere SYNC antes del Shock.">
+                        <span class="caso-icon" aria-hidden="true">∿</span>
+                        <span class="caso-name">Taquicardia Ventricular</span>
+                        <span class="caso-bpm">180 BPM — Requiere SYNC</span>
+                    </button>
+
+                    <button class="btn-caso" id="caso-brad" data-caso="brad"
+                            role="radio" aria-checked="false"
+                            title="Bradicardia Extrema: 30 BPM. Se trata con PACER, no con Shock.">
+                        <span class="caso-icon" aria-hidden="true">_∧_</span>
+                        <span class="caso-name">Bradicardia Extrema</span>
+                        <span class="caso-bpm">30 BPM — Usar PACER</span>
+                    </button>
+
+                </div>
+            </div>
+
+            <!-- Slider de Impedancia Corporal -->
+            <div class="control-group" id="grupo-resistencia">
+                <label class="control-label" for="slider-resistencia">
+                    IMPEDANCIA CORPORAL (R)
+                </label>
+                <div class="slider-container">
+                    <input
+                        type="range"
+                        id="slider-resistencia"
+                        min="50" max="150" value="75" step="1"
+                        class="slider-medico"
+                        aria-label="Resistencia del paciente en Ohmios"
+                        aria-valuemin="50" aria-valuemax="150" aria-valuenow="75"
+                    >
+                    <div class="slider-values">
+                        <span>50 Ω</span>
+                        <span class="slider-current" id="valor-resistencia">75 Ω</span>
+                        <span>150 Ω</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Panel Educativo: Parámetros del Circuito RLC -->
+            <div class="control-group edu-panel" id="panel-edu">
+                <label class="control-label">⚙️ PARÁMETROS DEL CIRCUITO RLC</label>
+                <div class="parametros-rlc" id="parametros-rlc">
+                    <div class="param-row">
+                        <span class="param-label">Resistencia (R):</span>
+                        <span class="param-value" id="param-R">75 Ω</span>
+                    </div>
+                    <div class="param-row">
+                        <span class="param-label">Inductancia (L):</span>
+                        <span class="param-value" id="param-L">50 mH</span>
+                    </div>
+                    <div class="param-row">
+                        <span class="param-label">Capacitancia (C):</span>
+                        <span class="param-value" id="param-C">20 µF</span>
+                    </div>
+                    <div class="param-row">
+                        <span class="param-label">Energía (E):</span>
+                        <span class="param-value" id="param-E">200 J</span>
+                    </div>
+                    <div class="param-row">
+                        <span class="param-label">V₀ = √(2E/C):</span>
+                        <span class="param-value" id="param-V0">4472 V</span>
+                    </div>
+                </div>
+
+                <!-- Análisis de Amortiguamiento -->
+                <div class="amort-panel" id="amort-panel">
+                    <label class="control-label" style="margin-top:6px;">
+                        📊 RÉGIMEN DE AMORTIGUAMIENTO
+                    </label>
+                    <div class="amort-formula">
+                        <div>Δ = α² − ω₀²   donde  α = R/2L, ω₀ = 1/√LC</div>
+                        <div class="amort-valor" id="amort-valor">—</div>
+                        <div class="amort-tipo" id="amort-tipo">—</div>
+                    </div>
+                </div>
+
+                <!-- Ecuación Diferencial mostrada simbólicamente -->
+                <div class="edo-display">
+                    <label class="control-label" style="margin-top:6px;">
+                        📐 ECUACIÓN DIFERENCIAL ACTIVA
+                    </label>
+                    <div class="edo-formula">
+                        <div>L·q″ + R·q′ + (1/C)·q = 0</div>
+                        <div class="edo-sustituida" id="edo-sustituida">
+                            50m·q″ + 75·q′ + 50000·q = 0
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </aside><!-- /panel-entorno -->
+
+
+        <!-- ════════════════════════════════════════════════════════════
+             PANEL CENTRAL — MONITOR LIFEPAK + GRÁFICAS RLC
+             ════════════════════════════════════════════════════════════ -->
+        <section class="panel-monitor" id="panel-monitor"
+                 aria-label="Monitor de desfibrilador y gráficas RLC">
+
+            <!-- Pantalla digital del monitor -->
+            <div class="monitor-screen">
+                <div class="monitor-bezel" role="img" aria-label="Pantalla del monitor de ECG">
+
+                    <!-- Barra superior de información -->
+                    <div class="monitor-topbar">
+                        <div class="monitor-info-left">
+                            <span class="info-hr" aria-live="polite">
+                                HR <span id="display-hr">---</span> bpm
+                            </span>
+                            <span class="info-lead" aria-hidden="true">II ×1</span>
+                        </div>
+                        <div class="monitor-info-center">
+                            <span class="info-energia" aria-live="polite" id="display-energia">200 J</span>
+                            <time class="info-hora" id="display-hora" datetime="">00:00:00</time>
+                        </div>
+                        <div class="monitor-info-right">
+                            <span class="info-bat" id="display-bat" aria-label="Batería">🔋</span>
+                        </div>
+                    </div>
+
+                    <!-- Canvas principal del ECG -->
+                    <canvas
+                        id="canvas-ecg"
+                        width="700"
+                        height="200"
+                        aria-label="Señal de electrocardiograma en tiempo real"
+                        role="img">
+                        ECG no disponible (actualiza tu navegador)
+                    </canvas>
+
+                    <!-- Barra de estado inferior del monitor -->
+                    <div class="monitor-statusbar">
+                        <span class="status-msg msg-off" id="monitor-status-msg"
+                              role="status" aria-live="assertive">
+                            SISTEMA APAGADO
+                        </span>
+                        <span class="deterioro-timer" id="deterioro-timer"
+                              style="display:none;"
+                              aria-live="polite"
+                              title="Tiempo restante antes de que el paciente entre en asistolia">
+                        </span>
+                        <span class="pacer-info" id="pacer-info" style="display:none;"
+                              aria-live="polite">
+                            Demand &nbsp;
+                            <span id="display-ppm">70</span> PPM &nbsp;
+                            <span id="display-ma">80</span> mA
+                        </span>
+                    </div>
+
+                </div><!-- /monitor-bezel -->
+            </div><!-- /monitor-screen -->
+
+
+            <!-- ════════════════════════════════════════════════════════
+                 SECCIÓN DE GRÁFICAS RLC (Académico)
+                 Muestra las curvas calculadas por RK4
+                 ════════════════════════════════════════════════════════ -->
+            <div class="rlc-charts-section" id="rlc-charts">
+
+                <!-- ════════════════════════════════════════════════════════
+                     TOOLTIP GLOBAL PARA GRÁFICAS (Flotante)
+                     ════════════════════════════════════════════════════════ -->
+                <div id="chart-tooltip" class="chart-tooltip" style="display:none; position: absolute; pointer-events: none; z-index: 100;">
+                    <div class="tooltip-time" id="tooltip-time">t: -- ms</div>
+                    <div class="tooltip-values" id="tooltip-values">
+                        <!-- Los valores se insertarán dinámicamente aquí -->
+                    </div>
+                </div>
+
+                <div class="charts-header">
+                    <span class="charts-title">
+                        📈 ANÁLISIS RLC — Visualización del Algoritmo Runge-Kutta 4° Orden
+                    </span>
+                    <span class="charts-subtitle">
+                        Las curvas se calculan numéricamente con RK4 al presionar CHARGE y SHOCK.
+                        Compara el comportamiento según la impedancia corporal (R).
+                    </span>
+                </div>
+
+                <div class="charts-grid">
+
+                    <!-- Gráfica 1: Curva de Carga del Capacitor -->
+                    <div class="chart-card" id="card-carga">
+                        <div class="chart-header">
+                            <span class="chart-title">
+                                ⚡ FASE DE CARGA — Voltaje del Capacitor Vc(t)
+                            </span>
+                            <span class="chart-subtitle">
+                                EDO (1° orden): dVc/dt = (Vtarget − Vc) / τ &nbsp;|&nbsp;
+                                Resuelto con RK4 · Vc(0) = 0V (capacitor descargado)
+                            </span>
+                        </div>
+
+                        <canvas
+                            id="canvas-carga"
+                            width="420"
+                            height="180"
+                            aria-label="Curva de carga del capacitor"
+                            role="img">
+                        </canvas>
+
+                        <div class="chart-legend" aria-label="Leyenda de gráfica de carga">
+                            <span class="legend-item" style="color: #00FF7F">— Vc(t) [RK4]</span>
+                            <span class="legend-item" style="color: #FFD700">- - V₀ objetivo</span>
+                        </div>
+                        <div class="chart-stats" id="stats-carga">
+                            <span>V_final: <b id="stat-vfinal">—</b></span>
+                            <span>t(99%): <b id="stat-t99">—</b></span>
+                        </div>
+                    </div><!-- /card-carga -->
+
+                    <!-- Gráfica 2: Curva de Descarga Bifásica -->
+                    <div class="chart-card" id="card-descarga">
+                        <div class="chart-header">
+                            <span class="chart-title">
+                                💥 FASE DE DESCARGA — Pulso Bifásico I(t) y Vc(t)
+                            </span>
+                            <span class="chart-subtitle">
+                                EDO (2° orden): L·q″ + R·q′ + q/C = 0 &nbsp;|&nbsp;
+                                RK4 · Inversión de polaridad en t = 6ms (pulso bifásico)
+                            </span>
+                        </div>
+
+                        <canvas
+                            id="canvas-descarga"
+                            width="420"
+                            height="180"
+                            aria-label="Curva de descarga bifásica del desfibrilador"
+                            role="img">
+                        </canvas>
+
+                        <div class="chart-legend" aria-label="Leyenda de gráfica de descarga">
+                            <span class="legend-item" style="color: #FF6B35">— I(t) corriente</span>
+                            <span class="legend-item" style="color: #00BFFF">— Vc(t) voltaje</span>
+                            <span class="legend-item" style="color: rgba(255,215,0,0.5)">· · Fase 2 (t=6ms)</span>
+                        </div>
+                        <div class="chart-stats" id="stats-descarga">
+                            <span>I_pico: <b id="stat-ipico">—</b></span>
+                            <span>V_pico: <b id="stat-vpico">—</b></span>
+                            <span>E_entregada: <b id="stat-eentregada">—</b></span>
+                        </div>
+                        
+                        <!-- ── CONTROLES DE VISTA DE GRÁFICA DE DESCARGA ── -->
+                        <div class="chart-view-controls">
+                            <label class="view-control-label">Vista:</label>
+                            <label class="view-radio">
+                                <input type="radio" name="view-descarga" value="ambas" checked> Ambas
+                            </label>
+                            <label class="view-radio">
+                                <input type="radio" name="view-descarga" value="corriente"> Solo Corriente
+                            </label>
+                            <label class="view-radio">
+                                <input type="radio" name="view-descarga" value="voltaje"> Solo Voltaje
+                            </label>
+                        </div>
+                    </div><!-- /card-descarga -->
+
+                </div><!-- /charts-grid -->
+            </div><!-- /rlc-charts -->
+
+        </section><!-- /panel-monitor -->
+
+
+        <!-- ════════════════════════════════════════════════════════════
+             PANEL DERECHO — CONTROLES DEL DESFIBRILADOR
+             (Inspirado en LIFEPAK 20e de Medtronic)
+             ════════════════════════════════════════════════════════════ -->
+        <aside class="panel-defib" id="panel-defib"
+               aria-label="Controles del desfibrilador">
+
+            <!-- ── BLOQUE DE DESFIBRILACIÓN MANUAL ─────────────────── -->
+            <div class="defib-block" role="group" aria-label="Bloque de desfibrilación manual">
+
+                <!-- Botón 1: ON/OFF -->
+                <div class="control-row">
+                    <button class="btn-defib btn-on" id="btn-on"
+                            aria-pressed="false"
+                            title="Enciende o apaga el desfibrilador">
+                        <span class="btn-num" aria-hidden="true">1</span>
+                        <span class="btn-led" id="led-on" aria-hidden="true"></span>
+                        <span class="btn-label">ON / OFF</span>
+                    </button>
+                </div>
+
+                <!-- Botón 2: ENERGY SELECT -->
+                <div class="control-row energy-row">
+                    <div class="energy-display" role="group" aria-label="Selector de energía">
+                        <button class="btn-arrow" id="btn-energy-down"
+                                aria-label="Bajar energía"
+                                title="Reducir Joules">▼</button>
+
+                        <div class="energy-value-box">
+                            <span class="energy-num" id="energy-display"
+                                  aria-live="polite" aria-label="Energía seleccionada">200</span>
+                            <span class="energy-unit">J</span>
+                        </div>
+
+                        <button class="btn-arrow" id="btn-energy-up"
+                                aria-label="Subir energía"
+                                title="Aumentar Joules">▲</button>
+                    </div>
+                    <span class="control-label-small">2 ENERGY SELECT</span>
+                </div>
+
+                <!-- Botón 3: CHARGE -->
+                <div class="control-row">
+                    <button class="btn-defib btn-charge disabled" id="btn-charge"
+                            disabled
+                            aria-label="Iniciar carga del capacitor"
+                            title="Presiona para cargar el capacitor desde 0V hasta el voltaje objetivo">
+                        <span class="btn-num" aria-hidden="true">3</span>
+                        <span class="btn-label">CHARGE</span>
+                    </button>
+                    <!-- Barra de progreso de carga -->
+                    <div class="charge-bar-container" id="charge-bar-container"
+                         role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"
+                         aria-label="Progreso de carga del capacitor">
+                        <div class="charge-bar" id="charge-bar"></div>
+                        <span class="charge-percent" id="charge-percent" aria-hidden="true">0%</span>
+                    </div>
+                </div>
+
+                <!-- Botón SHOCK -->
+                <div class="control-row">
+                    <button class="btn-defib btn-shock disabled" id="btn-shock"
+                            disabled
+                            aria-label="Ejecutar descarga del desfibrilador"
+                            title="Ejecuta la descarga bifásica. Solo disponible tras completar la carga.">
+                        <span class="shock-icon" aria-hidden="true">⚡</span>
+                        <span class="btn-label">SHOCK</span>
+                    </button>
+                </div>
+
+                <!-- Botones LEAD y SIZE -->
+                <div class="control-row-double">
+                    <button class="btn-small" id="btn-lead"
+                            title="Seleccionar derivación ECG">LEAD</button>
+                    <button class="btn-small" id="btn-size"
+                            title="Ajustar ganancia de la señal">SIZE</button>
+                </div>
+
+                <!-- Botón SYNC -->
+                <div class="control-row">
+                    <button class="btn-defib btn-sync" id="btn-sync"
+                            aria-pressed="false"
+                            title="Sincronización: actívalo antes de cardiovertir Taquicardia Ventricular">
+                        <span class="btn-led sync-led" id="led-sync" aria-hidden="true"></span>
+                        <span class="btn-label">SYNC</span>
+                    </button>
+                </div>
+
+            </div><!-- /defib-block -->
+
+
+            <!-- ── BLOQUE DE SOPORTE FISIOLÓGICO ─────────────────────── -->
+            <div class="defib-block physio-block"
+                 role="group" aria-label="Bloque de soporte fisiológico">
+
+                <!-- Botón PACER -->
+                <div class="control-row">
+                    <button class="btn-defib btn-pacer" id="btn-pacer"
+                            aria-pressed="false"
+                            title="Activa el marcapasos transcutáneo. Útil en Bradicardia Extrema.">
+                        <span class="btn-led pacer-led" id="led-pacer" aria-hidden="true"></span>
+                        <span class="btn-label">PACER</span>
+                    </button>
+                </div>
+
+                <!-- RATE (PPM) -->
+                <div class="control-row stepper-row">
+                    <span class="stepper-label" id="label-rate">RATE</span>
+                    <button class="btn-stepper" id="btn-rate-down"
+                            aria-label="Bajar frecuencia del marcapasos"
+                            title="Reducir PPM">▼</button>
+                    <span class="stepper-value" id="display-rate"
+                          aria-live="polite" aria-labelledby="label-rate">70</span>
+                    <button class="btn-stepper" id="btn-rate-up"
+                            aria-label="Subir frecuencia del marcapasos"
+                            title="Aumentar PPM">▲</button>
+                    <span class="stepper-unit">PPM</span>
+                </div>
+
+                <!-- CURRENT (mA) -->
+                <div class="control-row stepper-row">
+                    <span class="stepper-label" id="label-current">mA</span>
+                    <button class="btn-stepper" id="btn-current-down"
+                            aria-label="Bajar corriente del marcapasos"
+                            title="Reducir miliamperios">▼</button>
+                    <span class="stepper-value" id="display-current"
+                          aria-live="polite" aria-labelledby="label-current">80</span>
+                    <button class="btn-stepper" id="btn-current-up"
+                            aria-label="Subir corriente del marcapasos"
+                            title="Aumentar miliamperios">▲</button>
+                    <span class="stepper-unit">mA</span>
+                </div>
+
+                <!-- ALARMS y PAUSE -->
+                <div class="control-row-double">
+                    <button class="btn-small btn-alarms" id="btn-alarms"
+                            title="Silenciar alarmas">ALARMS</button>
+                    <button class="btn-small" id="btn-pause"
+                            title="Pausar/reanudar la visualización del ECG">PAUSE</button>
+                </div>
+
+            </div><!-- /physio-block -->
+
+
+            <!-- ── BOTONES DE UTILIDAD INFERIORES ───────────────────── -->
+            <div class="utility-buttons" role="group" aria-label="Funciones adicionales">
+                <button class="btn-util" id="btn-print"
+                        title="Imprimir registro">PRINT</button>
+                <button class="btn-util" id="btn-code-summary"
+                        title="Resumen del código del evento">CODE SUMMARY</button>
+                <button class="btn-util" id="btn-event"
+                        title="Registrar evento">EVENT</button>
+                <button class="btn-util" id="btn-options"
+                        title="Opciones del sistema">OPTIONS</button>
+            </div>
+
+        </aside><!-- /panel-defib -->
+
+    </main><!-- /app-main -->
+
+
+    <!-- ════════════════════════════════════════════════════════════════
+         CONSOLA DE VERIFICACIÓN ACADÉMICA (RK4)
+         Muestra los valores numéricos del algoritmo para análisis
+         ════════════════════════════════════════════════════════════════ -->
+    <div class="console-panel" id="console-panel" role="log" aria-label="Consola de verificación RK4">
+        <div class="console-header">
+            <span>🖥️ CONSOLA DE VERIFICACIÓN ACADÉMICA — RK4</span>
+            <button class="btn-console-toggle" id="btn-console-toggle"
+                    aria-label="Mostrar/ocultar consola"
+                    title="Toggle consola">▼</button>
+        </div>
+        <div class="console-body" id="console-body">
+            <pre class="console-output" id="console-output">// ═══════════════════════════════════════════════════════════════
+// SimDesFib — Simulador de Desfibrilador Médico
+// Motor: Circuito RLC + Runge-Kutta 4° Orden (RK4)
+// Proyecto académico: Ecuaciones Diferenciales Ordinarias
+// ═══════════════════════════════════════════════════════════════
+//
+// INSTRUCCIONES DE USO (Fase 1):
+//   1. Presiona [ON/OFF] para encender el sistema
+//   2. Ajusta la energía con [▲▼ ENERGY SELECT]
+//   3. Modifica la impedancia con el slider de R (50-150Ω)
+//   4. Presiona [CHARGE] → el RK4 calcula la curva de carga
+//   5. Presiona [SHOCK]  → el RK4 calcula el pulso bifásico
+//   6. Observa las gráficas y los valores en esta consola
+//
+// NOTA: Con R=50Ω → Subamortiguado (oscilaciones)
+//       Con R=100Ω → Críticamente amortiguado
+//       Con R=150Ω → Sobreamortiguado (decaimiento suave)
+//
+// Presiona ON para comenzar...
+</pre>
+        </div>
+    </div><!-- /console-panel -->
+
+    <!-- Scripts (cargados en orden, sin módulos para soportar file://) -->
+    <script src="js/rlcEngine.js"></script>
+    <script src="js/ecgSimulator.js"></script>
+    <script src="js/audioEngine.js"></script>
+    <script src="js/main.js"></script>
+
+</body>
+</html>
